@@ -1207,7 +1207,7 @@ class NetworkClient {
     this._tickTimer  = 0;
   }
 
-connect(scene, onBlockChange, onChatMsg) {
+  connect(scene, onBlockChange, onChatMsg) {
     this.scene         = scene;
     this.onBlockChange = onBlockChange;
     this.onChatMsg     = onChatMsg;
@@ -1216,7 +1216,8 @@ connect(scene, onBlockChange, onChatMsg) {
     this.statusEl.textContent = '🟡 CONNECTING...';
 
     try {
-      this.ws = new WebSocket(SERVER_URL);
+      // ИСПОЛЬЗУЕМ ЗАЩИЩЕННЫЙ WSS
+      this.ws = new WebSocket('wss://voxelserver.onrender.com');
     } catch(e) {
       this._setOffline();
       return;
@@ -1252,6 +1253,14 @@ connect(scene, onBlockChange, onChatMsg) {
   }
 
   _handleMessage(msg) {
+    // Выводим пакеты в консоль для отладки
+    console.log("WS Message:", msg);
+
+    // ЗАЩИТА: Унифицируем ID и Позицию (на случай разных названий от сервера)
+    const playerId = msg.id || msg.playerId;
+    const position = msg.position || msg.pos;
+    const rotation = msg.rotation || msg.rot;
+
     switch (msg.type) {
       case 'welcome':
         this.myId = msg.id;
@@ -1275,20 +1284,34 @@ connect(scene, onBlockChange, onChatMsg) {
         break;
 
       case 'player_join':
-        if (msg.id !== this.myId) {
-          this._spawnPlayer(msg.id, msg.position);
-          if (this.onChatMsg) this.onChatMsg('System', `Player ${msg.id.slice(0,6)} joined`);
+      case 'join':
+        if (playerId && playerId !== this.myId) {
+          this._spawnPlayer(playerId, position);
+          if (this.onChatMsg) this.onChatMsg('System', `Player ${String(playerId).slice(0,6)} joined`);
         }
         break;
 
       case 'player_leave':
-        this._removePlayer(msg.id);
-        if (this.onChatMsg) this.onChatMsg('System', `Player ${msg.id.slice(0,6)} left`);
+      case 'leave':
+        if (playerId) this._removePlayer(playerId);
+        if (this.onChatMsg && playerId) this.onChatMsg('System', `Player ${String(playerId).slice(0,6)} left`);
         break;
 
       case 'player_move':
-        if (msg.id !== this.myId) {
-          this._updatePlayer(msg.id, msg.position, msg.rotation);
+      case 'move': 
+        if (playerId && playerId !== this.myId) {
+          this._updatePlayer(playerId, position, rotation);
+        }
+        break;
+
+      case 'multi_move': // Поддержка батч-обновлений сервера (оптимизация)
+        if (msg.moves && Array.isArray(msg.moves)) {
+          for (const m of msg.moves) {
+            const mId = m.id || m.playerId;
+            if (mId && mId !== this.myId) {
+              this._updatePlayer(mId, m.position || m.pos, m.rotation || m.rot);
+            }
+          }
         }
         break;
 
@@ -1314,22 +1337,30 @@ connect(scene, onBlockChange, onChatMsg) {
   }
 
   _spawnPlayer(id, pos) {
+    if (!id || !pos) return;
     if (this.otherPlayers[id]) return;
+    
+    // Розовая моделька куба
     const geo  = new THREE.BoxGeometry(0.6, 1.8, 0.6);
     const mat  = new THREE.MeshLambertMaterial({ color: 0xE91E63 });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(pos.x, pos.y + 0.9, pos.z);
+    
+    // Безопасный парсинг координат
+    const x = pos.x ?? pos[0] ?? 0;
+    const y = pos.y ?? pos[1] ?? 0;
+    const z = pos.z ?? pos[2] ?? 0;
+
+    mesh.position.set(x, y + 0.9, z);
     this.scene.add(mesh);
 
     // Name label DOM
     const label = document.createElement('div');
     label.className = 'player-label';
-    label.textContent = id.slice(0, 6);
+    label.textContent = String(id).slice(0, 6);
     document.body.appendChild(label);
 
-    this.otherPlayers[id] = { mesh, label, position: new THREE.Vector3(pos.x, pos.y, pos.z) };
-    document.getElementById('stat-players').textContent =
-      Object.keys(this.otherPlayers).length + 1;
+    this.otherPlayers[id] = { mesh, label, position: new THREE.Vector3(x, y, z) };
+    document.getElementById('stat-players').textContent = Object.keys(this.otherPlayers).length + 1;
   }
 
   _removePlayer(id) {
@@ -1340,39 +1371,50 @@ connect(scene, onBlockChange, onChatMsg) {
     p.mesh.material.dispose();
     p.label.remove();
     delete this.otherPlayers[id];
-    document.getElementById('stat-players').textContent =
-      Object.keys(this.otherPlayers).length + 1;
+    document.getElementById('stat-players').textContent = Object.keys(this.otherPlayers).length + 1;
   }
 
   _updatePlayer(id, pos, rot) {
+    if (!id || !pos) return;
     if (!this.otherPlayers[id]) {
       this._spawnPlayer(id, pos);
       return;
     }
+    
+    const x = pos.x ?? pos[0] ?? 0;
+    const y = pos.y ?? pos[1] ?? 0;
+    const z = pos.z ?? pos[2] ?? 0;
+
     const p = this.otherPlayers[id];
-    p.mesh.position.set(pos.x, pos.y + 0.9, pos.z);
-    p.mesh.rotation.y = rot ? rot.y : 0;
-    p.position.set(pos.x, pos.y, pos.z);
+    p.mesh.position.set(x, y + 0.9, z);
+    p.mesh.rotation.y = rot ? (rot.y ?? rot[1] ?? 0) : 0;
+    p.position.set(x, y, z);
   }
 
-  // Project player labels to screen space
+  // Отрисовка ников игроков
   updateLabels(camera, renderer) {
     const canvas = renderer.domElement;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+
     for (const id in this.otherPlayers) {
       const p = this.otherPlayers[id];
-      const pos3D = p.mesh.position.clone();
-      pos3D.y += 1.2;
-      const projected = pos3D.project(camera);
-      const sx = ( projected.x * 0.5 + 0.5) * w;
-      const sy = (-projected.y * 0.5 + 0.5) * h;
+      
+      const toPlayer = p.mesh.position.clone().sub(camera.position);
+      const isBehind = toPlayer.dot(camDir) < 0; // Прячем ники, если игрок сзади
 
-      if (projected.z > 1.0) {
-        // Behind camera
+      if (isBehind) {
         p.label.style.display = 'none';
       } else {
+        const pos3D = p.mesh.position.clone();
+        pos3D.y += 1.2;
+        const projected = pos3D.project(camera);
+        const sx = ( projected.x * 0.5 + 0.5) * w;
+        const sy = (-projected.y * 0.5 + 0.5) * h;
+
         p.label.style.display = 'block';
         p.label.style.left  = sx + 'px';
         p.label.style.top   = (sy - 20) + 'px';
