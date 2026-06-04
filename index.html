@@ -1215,17 +1215,12 @@ class NetworkClient {
     this.statusEl.className = 'connecting';
     this.statusEl.textContent = '🟡 CONNECTING...';
 
-try {
+    try {
       this.ws = new WebSocket('wss://voxelserver.onrender.com');
     } catch(e) {
       this._setOffline();
       return;
     }
-
-  // 2. СРАЗУ ПОСЛЕ ЭТОГО настраиваем события (убедись, что тут нет лишних обнулений сокета!)
-  this.socket.onopen = () => {
-    // твой код при открытии...
-  };
 
     this.ws.onopen = () => {
       this.connected = true;
