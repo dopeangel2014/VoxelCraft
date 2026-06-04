@@ -1207,7 +1207,7 @@ class NetworkClient {
     this._tickTimer  = 0;
   }
 
-  connect(scene, onBlockChange, onChatMsg) {
+connect(scene, onBlockChange, onChatMsg) {
     this.scene         = scene;
     this.onBlockChange = onBlockChange;
     this.onChatMsg     = onChatMsg;
@@ -1216,7 +1216,7 @@ class NetworkClient {
     this.statusEl.textContent = '🟡 CONNECTING...';
 
     try {
-      this.ws = new WebSocket('wss://voxelserver.onrender.com');
+      this.ws = new WebSocket(SERVER_URL);
     } catch(e) {
       this._setOffline();
       return;
