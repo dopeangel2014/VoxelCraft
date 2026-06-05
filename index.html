@@ -1,39 +1,54 @@
-<script>
-// ... [ВНУТРИ КЛАССА VoxelGame] ...
 
-  _init() {
-    // ... существующий код ...
-    
-    // ДОБАВЛЕНО: Рука персонажа
-    this.hand = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 0.2, 0.6),
-        new THREE.MeshLambertMaterial({ color: 0xFFA07A }) 
-    );
-    this.hand.position.set(0.3, -0.2, -0.4);
-    this.camera.add(this.hand); // Привязываем к камере
-  }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VoxelCraft</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; color: #fff; font-family: monospace; }
+        #crosshair { position: fixed; top: 50%; left: 50%; width: 20px; height: 20px; border: 2px solid white; transform: translate(-50%, -50%); pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- BASE GAME SETUP ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
 
-  // ДОБАВЛЕНО: Исправленная логика установки блоков (Anti-Stuck)
-  _updateBlockInteraction() {
-    const pp = this.physics.position;
-    const placeX = Math.floor(this.raycast.x);
-    const placeY = Math.floor(this.raycast.y);
-    const placeZ = Math.floor(this.raycast.z);
+        // --- HAND IMPLEMENTATION ---
+        const hand = new THREE.Mesh(
+            new THREE.BoxGeometry(0.2, 0.2, 0.6),
+            new THREE.MeshLambertMaterial({ color: 0xFFA07A })
+        );
+        hand.position.set(0.3, -0.2, -0.4);
+        camera.add(hand);
+        scene.add(camera);
 
-    // Проверка, не стоит ли игрок в этом блоке (ноги + голова)
-    const isInside = (Math.floor(pp.x) === placeX && Math.floor(pp.y) === placeY && Math.floor(pp.z) === placeZ) ||
-                     (Math.floor(pp.x) === placeX && Math.floor(pp.y + 1) === placeY && Math.floor(pp.z) === placeZ);
+        // --- ANTI-STUCK LOGIC ---
+        function canPlaceBlock(x, y, z, playerPos) {
+            const px = Math.floor(playerPos.x);
+            const py = Math.floor(playerPos.y);
+            const pz = Math.floor(playerPos.z);
+            
+            // Запрет, если блок совпадает с позицией ног или головы игрока
+            if ((x === px && y === py && z === pz) || 
+                (x === px && y === py + 1 && z === pz)) {
+                return false;
+            }
+            return true;
+        }
 
-    if (isInside) {
-        console.log("Cannot place block here: player blocking");
-        return; 
-    }
-
-    // Если всё ок — ставим
-    if (this.world.setBlock(placeX, placeY, placeZ, this.activeBlockId)) {
-        this.network.sendBlockChange(placeX, placeY, placeZ, this.activeBlockId);
-    }
-  }
-
-// ... [ОСТАЛЬНОЙ КОД КЛИЕНТА] ...
-</script>
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
